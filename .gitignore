@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Pipenv
+Pipfile.lock
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files
+data/
+*.csv
+*.xlsx
+*.json
+
+# Analysis output
+analysis_results/
+*.png
+*.jpg
+*.pdf
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Rope project
+.ropeproject/
+
+# Docker
+.docker/
+
+# Mac OS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

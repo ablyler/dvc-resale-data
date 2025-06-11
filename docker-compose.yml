@@ -1,0 +1,22 @@
+version: '3'
+
+services:
+  scraper:
+    build: .
+    volumes:
+      - ./data:/data
+    command: ["rofr_scraper.py", "--output", "/data/rofr_data.csv", "--current-thread", "https://www.disboards.com/threads/rofr-thread-april-to-june-2025-please-see-first-post-for-instructions-formatting-tool.3965193"]
+    # Add --start-date "MM/YYYY" to filter data from a specific date
+    # Example: uncomment and modify the line below to filter data
+    # command: ["rofr_scraper.py", "--output", "/data/rofr_data.csv", "--current-thread", "https://www.disboards.com/threads/rofr-thread-april-to-june-2025-please-see-first-post-for-instructions-formatting-tool.3965193", "--start-date", "01/2023"]
+  
+  analyzer:
+    build: .
+    volumes:
+      - ./data:/data
+    command: ["analyze_rofr_data.py", "/data/rofr_data.csv", "--output-dir", "/data/analysis"]
+    depends_on:
+      - scraper
+
+volumes:
+  data:

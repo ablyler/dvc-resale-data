@@ -1,0 +1,51 @@
+# Docker ignore file
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Local development files
+.env
+.venv
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker files
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Data files (will be mounted as volume)
+data/
+*.csv
+*.xlsx
+*.json
+
+# Git
+.git/
+.gitignore
+
+# Pipenv local files
+.python-version
+
+# Analysis outputs
+analysis_results/
+*.png
+*.jpg
+*.pdf
