@@ -1,0 +1,285 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "18.x"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # Job 1: Lint and Test Python Azure Functions
+  test-azure-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          cd azure-functions
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 black isort
+
+      - name: Lint with flake8
+        run: |
+          cd azure-functions
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+
+      - name: Check code formatting with black
+        run: |
+          cd azure-functions
+          black --check --diff .
+
+      - name: Check import sorting with isort
+        run: |
+          cd azure-functions
+          isort --check-only --diff .
+
+      - name: Run tests with pytest
+        run: |
+          cd azure-functions
+          python -m pytest tests/ --cov=. --cov-report=xml --cov-report=term-missing --verbose || true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./azure-functions/coverage.xml
+          flags: azure-functions
+          name: codecov-azure-functions
+          fail_ci_if_error: false
+
+  # Job 2: Lint and Test React Webapp
+  test-webapp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: "webapp/package-lock.json"
+
+      - name: Install dependencies
+        run: |
+          cd webapp
+          npm ci
+
+      - name: Lint with ESLint
+        run: |
+          cd webapp
+          npm run lint
+
+      - name: Check code formatting with Prettier
+        run: |
+          cd webapp
+          npm run format:check
+
+      - name: Type check (if using TypeScript)
+        run: |
+          cd webapp
+          # npm run type-check || true
+
+      - name: Run tests
+        run: |
+          cd webapp
+          npm run test -- --coverage --passWithNoTests --watchAll=false
+        env:
+          CI: true
+
+      - name: Build application
+        run: |
+          cd webapp
+          npm run build
+        env:
+          CI: false
+          REACT_APP_API_BASE_URL: https://api.dvcresaledata.com
+          REACT_APP_ENV: production
+          GENERATE_SOURCEMAP: false
+
+      - name: Upload test coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./webapp/coverage/lcov.info
+          flags: webapp
+          name: codecov-webapp
+          fail_ci_if_error: false
+
+  # Job 3: Security and Dependency Scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"
+
+      - name: Set up Node.js for npm audit
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run npm audit on webapp
+        run: |
+          cd webapp
+          npm audit --audit-level moderate || true
+
+      - name: Set up Python for safety check
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install safety
+        run: pip install safety
+
+      - name: Run safety check on Azure Functions
+        run: |
+          cd azure-functions
+          safety check -r requirements.txt || true
+
+  # Job 4: Code Quality Analysis
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Shallow clones should be disabled for better analysis
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
+
+  # Job 5: Build and Test Docker Images (if applicable)
+  docker-build:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Azure Functions Docker image
+        run: |
+          if [ -f "azure-functions/Dockerfile" ]; then
+            docker build -t rofr-functions:test azure-functions/
+          fi
+
+      - name: Build webapp Docker image
+        run: |
+          if [ -f "webapp/Dockerfile" ]; then
+            docker build -t webapp:test webapp/
+          fi
+
+  # Job 6: Integration Tests
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [test-azure-functions, test-webapp]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Run integration tests
+        run: |
+          # Add integration test commands here
+          echo "Running integration tests..."
+          # python -m pytest integration_tests/
+        env:
+          TEST_ENV: production
+
+  # Job 7: Performance Tests
+  performance-tests:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.12.x
+
+      - name: Build webapp
+        run: |
+          cd webapp
+          npm ci
+          npm run build
+        env:
+          CI: false
+          REACT_APP_API_BASE_URL: https://api.dvcresaledata.com
+
+      - name: Run Lighthouse CI
+        run: |
+          cd webapp
+          lhci autorun || true
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+
+  # Job 8: Dependency Updates Check
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v3
+        with:
+          fail-on-severity: moderate

@@ -1,0 +1,80 @@
+# Example Terraform Variables File
+# Copy this file to terraform.tfvars and customize the values for your deployment
+# terraform.tfvars is ignored by git for security
+
+# Azure Configuration (Required)
+subscription_id      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+resource_group_name  = "dvc-resale-data"
+location            = "East US 2"
+domain_name         = "dvcresaledata.com"
+
+# Environment and Project Settings
+environment    = "production"
+project_name   = "dvc-resale-data"
+
+# Function App Configuration
+function_app_sku = "Y1"  # Y1 (Consumption), EP1, EP2, EP3 (Premium)
+
+# Front Door Configuration
+frontdoor_sku = "Standard_AzureFrontDoor"  # Standard_AzureFrontDoor, Premium_AzureFrontDoor
+
+# Logging and Monitoring
+log_retention_days     = 30
+enable_diagnostic_logs = true
+
+# Security Settings
+enable_https_only = true
+
+# Scraper Configuration
+# Core scraper settings for performance and behavior tuning
+scraper_delay     = "1.0"   # Seconds between requests (higher = more polite, slower)
+scraper_max_pages = "50"    # Maximum pages to scrape per thread (lower = faster, less data)
+scraper_log_level = "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+# HTTP Configuration
+scraper_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# Performance Settings
+enable_compression = true   # Enable HTTP response compression
+enable_caching     = true   # Enable response caching for better performance
+
+# Scraper Target Configuration
+disboards_url = "https://www.disboards.com/"
+
+# Function App Performance
+function_timeout = "00:10:00"  # Maximum function execution time (HH:MM:SS)
+batch_size       = "25"        # Processing batch size for operations
+request_timeout  = "30"        # HTTP request timeout in seconds
+
+# Table Storage Configuration
+# These correspond to tables created in Azure Table Storage
+rofr_table_name       = "rofrentries"  # Main ROFR data table
+threads_table_name    = "threads"      # Thread tracking table
+statistics_table_name = "statistics"   # Statistics and metrics table
+
+# Additional Tags (Optional)
+tags = {
+  Environment = "production"
+  Project     = "dvc-resale-data"
+  ManagedBy   = "terraform"
+  Owner       = "your-team"
+  CostCenter  = "your-cost-center"
+}
+
+# Performance Tuning Notes:
+#
+# For high-volume scraping:
+# - Increase scraper_max_pages to 100+
+# - Decrease scraper_delay to 0.5
+# - Increase batch_size to 50
+# - Consider upgrading function_app_sku to EP1
+#
+# For rate-limit friendly scraping:
+# - Increase scraper_delay to 2.0+
+# - Decrease scraper_max_pages to 25
+# - Keep batch_size at 25 or lower
+#
+# For development/testing:
+# - Set scraper_max_pages to 5-10
+# - Set scraper_log_level to "DEBUG"
+# - Disable caching: enable_caching = false

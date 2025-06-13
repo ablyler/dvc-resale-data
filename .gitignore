@@ -35,7 +35,7 @@ Pipfile.lock
 
 # IDE files
 .idea/
-.vscode/
+
 *.swp
 *.swo
 
@@ -43,7 +43,6 @@ Pipfile.lock
 data/
 *.csv
 *.xlsx
-*.json
 
 # Analysis output
 analysis_results/
@@ -67,3 +66,9 @@ analysis_results/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Local settings
+local.settings.json
+
+# Web Artifacts
+webapp/public/
