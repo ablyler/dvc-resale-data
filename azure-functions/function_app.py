@@ -1259,7 +1259,10 @@ def debug_data(req: func.HttpRequest) -> func.HttpResponse:
             'bwv_entries': len(bwv_entries),
             'sample_resorts': list(set([e.resort for e in entries[:20]])),
             'sample_bwv_prices': [e.price_per_point for e in bwv_entries[:5]],
-            'sample_bwv_dates': [e.sent_date.isoformat() if e.sent_date else None for e in bwv_entries[:5]]
+            'sample_bwv_dates': [e.sent_date.isoformat() if e.sent_date else None for e in bwv_entries[:5]],
+            'raw_entry_samples': [e.raw_entry for e in entries[:5]],
+            'raw_entry_lengths': [len(e.raw_entry) if e.raw_entry else 0 for e in entries[:5]],
+            'entries_with_raw_data': len([e for e in entries if e.raw_entry])
         }
 
         return create_success_response(debug_info)

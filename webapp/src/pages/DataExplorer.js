@@ -700,6 +700,25 @@ const DataExplorer = () => {
                               "N/A"
                             );
                             break;
+                          case "raw_entry":
+                            cellContent = entry[columnKey] ? (
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  maxWidth: 300,
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  cursor: "pointer",
+                                }}
+                                title={entry[columnKey]}
+                              >
+                                {entry[columnKey]}
+                              </Typography>
+                            ) : (
+                              "N/A"
+                            );
+                            break;
                           default:
                             cellContent = entry[columnKey] || "N/A";
                         }

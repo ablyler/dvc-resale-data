@@ -376,7 +376,7 @@ class OptimizedAzureTableStorageManager:
                 select=[
                     'PartitionKey', 'RowKey', 'username', 'price_per_point',
                     'total_cost', 'points', 'resort', 'use_year', 'points_details',
-                    'sent_date', 'result', 'result_date', 'thread_url'
+                    'sent_date', 'raw_entry' 'result', 'result_date', 'thread_url'
                 ]  # Only select needed columns
             )
 
