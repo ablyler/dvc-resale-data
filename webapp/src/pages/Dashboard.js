@@ -16,7 +16,7 @@ import {
   Select,
   MenuItem,
 } from "@mui/material";
-import { format, parseISO, formatDistanceToNow } from "date-fns";
+import { format, parseISO, isToday, differenceInDays } from "date-fns";
 import {
   TrendingUp,
   TrendingDown,
@@ -66,14 +66,33 @@ const Dashboard = () => {
     [],
   );
 
-  // Utility function to convert UTC timestamp to local time
-  // The server returns timestamps like "2025-06-19T18:40:08.873965" without timezone info
-  // These are UTC timestamps but JavaScript treats them as local time without the 'Z' suffix
-  // Adding 'Z' forces correct UTC interpretation, then parseISO converts to local browser time
-  const parseUTCTimestamp = (utcTimestamp) => {
-    if (!utcTimestamp) return null;
-    // Add 'Z' suffix to ensure timestamp is treated as UTC
-    return parseISO(utcTimestamp + "Z");
+  // Parse date strings (like "2025-01-15") as simple dates without timezone conversion
+  const parseSimpleDate = (dateString) => {
+    if (!dateString) return null;
+    // For ISO date strings (YYYY-MM-DD), parse directly without timezone handling
+    return parseISO(dateString);
+  };
+
+  // Get relative time description for a date
+  const getRelativeTimeLabel = (date) => {
+    if (!date) return null;
+
+    if (isToday(date)) {
+      return "today";
+    }
+
+    const daysAgo = differenceInDays(new Date(), date);
+    if (daysAgo === 1) {
+      return "1 day ago";
+    } else if (daysAgo > 1) {
+      return `${daysAgo} days ago`;
+    } else if (daysAgo === -1) {
+      return "tomorrow";
+    } else if (daysAgo < -1) {
+      return `in ${Math.abs(daysAgo)} days`;
+    }
+
+    return "today";
   };
 
   // Prefetch commonly used data on component mount
@@ -581,24 +600,24 @@ const Dashboard = () => {
                 color="text.primary"
                 fontWeight="medium"
               >
-                Last Entry Scraped
+                Lastest Contract ROFR Sent Date
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {lastScrapedEntry
-                  ? `${format(parseUTCTimestamp(lastScrapedEntry), "MMM d, yyyy, h:mm:ss a")} (Local Time)`
+                  ? format(parseSimpleDate(lastScrapedEntry), "MMM d, yyyy")
                   : "No data available"}
               </Typography>
             </Box>
           </Box>
           {lastScrapedEntry && (
-            <Tooltip title={`Raw timestamp: ${lastScrapedEntry} UTC`}>
+            <Tooltip
+              title={`Date when most recent ROFR was sent: ${lastScrapedEntry}`}
+            >
               <Chip
-                label={formatDistanceToNow(
-                  parseUTCTimestamp(lastScrapedEntry),
-                  {
-                    addSuffix: true,
-                  },
-                )}
+                label={
+                  getRelativeTimeLabel(parseSimpleDate(lastScrapedEntry)) ||
+                  "unknown"
+                }
                 size="small"
                 color="success"
                 variant="outlined"
@@ -882,9 +901,10 @@ const Dashboard = () => {
                     <Box sx={{ textAlign: "center", p: 1 }}>
                       <Typography variant="h6" color="info.main">
                         {displayStats?.last_updated
-                          ? parseUTCTimestamp(
-                              displayStats.last_updated,
-                            ).toLocaleDateString()
+                          ? format(
+                              parseSimpleDate(displayStats.last_updated),
+                              "MMM d, yyyy",
+                            )
                           : "N/A"}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
