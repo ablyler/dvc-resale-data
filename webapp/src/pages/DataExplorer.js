@@ -153,6 +153,7 @@ const DataExplorer = () => {
     { key: "points_details", label: "Points Details" },
     { key: "result", label: "Status" },
     { key: "thread_url", label: "Thread URL" },
+    { key: "raw_entry", label: "Raw Entry" },
   ];
 
   const useYears = [

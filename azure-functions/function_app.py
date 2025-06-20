@@ -902,10 +902,12 @@ def get_rofr_data(req: func.HttpRequest) -> func.HttpResponse:
                 'points': entry.points,
                 'total_cost': entry.total_cost,
                 'use_year': entry.use_year,
+                'points_details': entry.points_details,
                 'result': entry.result,
                 'sent_date': entry.sent_date.isoformat() if entry.sent_date else None,
                 'result_date': entry.result_date.isoformat() if entry.result_date else None,
-                'thread_url': entry.thread_url
+                'thread_url': entry.thread_url,
+                'raw_entry': entry.raw_entry
             })
 
         return create_success_response({
