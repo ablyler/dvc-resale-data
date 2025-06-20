@@ -18,6 +18,7 @@ import binascii
 from models import ThreadInfo, ROFREntry, ResortCodes
 from table_storage_manager import OptimizedAzureTableStorageManager
 from statistics_manager import StatisticsManager
+from statistics_calculator import StatisticsCalculator
 from queue_manager import ROFRQueueManager
 from rofr_scraper_azure import AzureROFRScraper
 from rofr_parsing_utils import ROFRParsingUtils
@@ -1239,6 +1240,341 @@ def trigger_stats_calculation_immediate(req: func.HttpRequest) -> func.HttpRespo
         return create_error_response(f"Failed to calculate statistics: {str(e)}")
     finally:
         _stats_calculation_in_progress = False
+
+@app.function_name(name="debug_data")
+@app.route(route="debug-data", auth_level=func.AuthLevel.ANONYMOUS)
+def debug_data(req: func.HttpRequest) -> func.HttpResponse:
+    """Debug endpoint to check data availability."""
+    try:
+        storage = get_storage_manager()
+        entries = storage.query_entries_optimized(limit=100)
+
+        # Check BWV entries specifically
+        bwv_entries = [e for e in entries if e.resort == "BWV"]
+
+        debug_info = {
+            'total_entries': len(entries),
+            'bwv_entries': len(bwv_entries),
+            'sample_resorts': list(set([e.resort for e in entries[:20]])),
+            'sample_bwv_prices': [e.price_per_point for e in bwv_entries[:5]],
+            'sample_bwv_dates': [e.sent_date.isoformat() if e.sent_date else None for e in bwv_entries[:5]]
+        }
+
+        return create_success_response(debug_info)
+    except Exception as e:
+        logger.error(f"Debug endpoint error: {str(e)}")
+        return create_error_response(str(e))
+
+@app.function_name(name="get_price_trends_analysis")
+@app.route(route="price-trends-analysis", auth_level=func.AuthLevel.ANONYMOUS)
+@compress_response
+def get_price_trends_analysis(req: func.HttpRequest) -> func.HttpResponse:
+    """Get price trends analysis with filtering."""
+    try:
+        # Extract parameters
+        time_range = int(req.params.get('timeRange', '12'))
+        min_price = float(req.params.get('minPrice', '0'))
+        max_price = float(req.params.get('maxPrice', '1000'))
+        resort = req.params.get('resort')
+
+        # Limit time range to reasonable values
+        time_range = min(time_range, 36)  # Max 3 years
+
+        logger.info(f"Price trends analysis requested: timeRange={time_range}, minPrice={min_price}, maxPrice={max_price}, resort={resort}")
+
+        # Get storage manager and fetch data
+        storage = get_storage_manager()
+
+        # Get entries for the specified time range (in months)
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.now().date() - timedelta(days=time_range * 30)
+
+        entries = storage.query_entries_optimized(
+            limit=10000,
+            sort_by='sent_date',
+            sort_order='desc'
+        )
+
+        logger.info(f"Retrieved {len(entries)} total entries from storage")
+
+        # Debug: Check a few sample entries
+        if entries:
+            sample_entry = entries[0]
+            logger.info(f"Sample entry: resort='{sample_entry.resort}', price_per_point={sample_entry.price_per_point}, sent_date={sample_entry.sent_date}")
+
+        # Filter entries by date, price range, and resort
+        filtered_entries = []
+        date_filtered = 0
+        price_filtered = 0
+        resort_filtered = 0
+
+        for entry in entries:
+            # Check date filter
+            if not entry.sent_date or entry.sent_date < cutoff_date:
+                date_filtered += 1
+                continue
+
+            # Check price filter
+            if not entry.price_per_point or entry.price_per_point <= 0:
+                price_filtered += 1
+                continue
+
+            if entry.price_per_point < min_price or entry.price_per_point > max_price:
+                price_filtered += 1
+                continue
+
+            # Check resort filter
+            if resort and entry.resort != resort:
+                resort_filtered += 1
+                continue
+
+            filtered_entries.append(entry)
+
+        logger.info(f"Filtering results: date_filtered={date_filtered}, price_filtered={price_filtered}, resort_filtered={resort_filtered}")
+        logger.info(f"Final filtered entries: {len(filtered_entries)} entries matching criteria")
+
+        # Debug: If we have resort filter, check what entries we found
+        if resort and len(filtered_entries) > 0:
+            resort_prices = [e.price_per_point for e in filtered_entries[:5]]
+            resort_results = [e.result for e in filtered_entries[:5]]
+            resort_dates = [e.sent_date.strftime('%Y-%m-%d') if e.sent_date else 'No date' for e in filtered_entries[:5]]
+            logger.info(f"First 5 {resort} prices: {resort_prices}")
+            logger.info(f"First 5 {resort} results: {resort_results}")
+            logger.info(f"First 5 {resort} dates: {resort_dates}")
+
+            # Count result types for the filtered resort
+            taken_count = len([e for e in filtered_entries if e.result == 'taken'])
+            passed_count = len([e for e in filtered_entries if e.result == 'passed'])
+            pending_count = len([e for e in filtered_entries if e.result == 'pending'])
+            logger.info(f"{resort} result summary: taken={taken_count}, passed={passed_count}, pending={pending_count}")
+        elif resort and len(filtered_entries) == 0:
+            logger.warning(f"No entries found for resort '{resort}' - checking if resort exists in data")
+            # Get a sample of all resorts from the first 100 entries to help debug
+            sample_resorts = list(set([e.resort for e in entries[:100] if e.resort]))
+            logger.info(f"Sample resorts in data: {sorted(sample_resorts)}")
+
+        # Calculate statistics manager for trends
+        stats_manager = get_statistics_manager()
+        price_trends = stats_manager.get_price_trends()
+
+        # If no stored trends, calculate basic trends from filtered data
+        if not price_trends and filtered_entries:
+            calc = StatisticsCalculator()
+            for entry in filtered_entries:
+                calc.add_entry(entry)
+            price_trends = calc.calculate_price_trends(days=time_range * 30)
+
+        # Create time-based trends data from entries (monthly aggregation)
+        trends_data = []
+        if filtered_entries:
+            logger.info(f"Processing {len(filtered_entries)} filtered entries for monthly aggregation")
+
+            # Group entries by month
+            monthly_data = {}
+            valid_entries = 0
+            for entry in filtered_entries:
+                if entry.sent_date and entry.price_per_point and entry.price_per_point > 0:
+                    month_key = entry.sent_date.strftime("%Y-%m")
+                    if month_key not in monthly_data:
+                        monthly_data[month_key] = []
+                    monthly_data[month_key].append(entry)
+                    valid_entries += 1
+
+            logger.info(f"Valid entries for monthly aggregation: {valid_entries} out of {len(filtered_entries)}")
+            logger.info(f"Created monthly data for {len(monthly_data)} months: {sorted(monthly_data.keys())}")
+
+            # Calculate monthly statistics
+            for month_key in sorted(monthly_data.keys()):
+                entries = monthly_data[month_key]
+                prices = [e.price_per_point for e in entries if e.price_per_point and e.price_per_point > 0]
+
+                logger.info(f"Month {month_key}: {len(entries)} entries, {len(prices)} valid prices")
+
+                if prices:
+                    # Calculate result counts
+                    taken = len([e for e in entries if e.result == 'taken'])
+                    passed = len([e for e in entries if e.result == 'passed'])
+                    pending = len([e for e in entries if e.result == 'pending'])
+                    total = len(entries)
+
+                    # Calculate ROFR rate - only include resolved entries (taken + passed) in calculation
+                    # Pending entries are excluded since their outcome is unknown
+                    resolved_entries = taken + passed
+                    rofr_rate = (taken / resolved_entries * 100) if resolved_entries > 0 else 0
+
+                    # Add detailed logging for debugging ROFR rate issues
+                    logger.info(f"Month {month_key} ROFR breakdown: taken={taken}, passed={passed}, pending={pending}, total={total}")
+                    logger.info(f"Month {month_key} resolved_entries={resolved_entries}, rofr_rate={rofr_rate}%")
+
+                    # Log sample results for debugging
+                    sample_results = [e.result for e in entries[:5]]
+                    logger.info(f"Month {month_key} sample results: {sample_results}")
+
+                    avg_price = round(sum(prices) / len(prices), 2)
+                    min_price_val = round(min(prices), 2)
+                    max_price_val = round(max(prices), 2)
+
+                    # Calculate alternative ROFR rate including pending entries for comparison
+                    total_non_pending = taken + passed
+                    rofr_rate_with_pending = (taken / total * 100) if total > 0 else 0
+
+                    logger.info(f"Month {month_key} stats: avg=${avg_price}, min=${min_price_val}, max=${max_price_val}")
+                    logger.info(f"Month {month_key} ROFR rate (resolved only): {rofr_rate}% (taken={taken}, resolved={total_non_pending})")
+                    logger.info(f"Month {month_key} ROFR rate (incl pending): {rofr_rate_with_pending:.2f}% (taken={taken}, total={total})")
+                    logger.info(f"Month {month_key} sample prices: {prices[:3] if len(prices) > 3 else prices}")
+
+                    trends_data.append({
+                        'month': month_key,
+                        'averagePrice': avg_price,
+                        'minPrice': min_price_val,
+                        'maxPrice': max_price_val,
+                        'total': total,
+                        'taken': taken,
+                        'passed': passed,
+                        'pending': pending,
+                        'rofrRate': round(rofr_rate, 2),
+                        'rofrRateWithPending': round(rofr_rate_with_pending, 2),
+                        'resolvedEntries': total_non_pending
+                    })
+
+        logger.info(f"Generated {len(trends_data)} monthly trend data points")
+
+        # Calculate overall statistics for summary
+        overall_stats = {}
+        if filtered_entries:
+            all_prices = [e.price_per_point for e in filtered_entries if e.price_per_point and e.price_per_point > 0]
+            if all_prices:
+                # Calculate overall ROFR statistics
+                overall_taken = len([e for e in filtered_entries if e.result == 'taken'])
+                overall_passed = len([e for e in filtered_entries if e.result == 'passed'])
+                overall_pending = len([e for e in filtered_entries if e.result == 'pending'])
+                overall_resolved = overall_taken + overall_passed
+                overall_rofr_rate = (overall_taken / overall_resolved * 100) if overall_resolved > 0 else 0
+
+                logger.info(f"Overall ROFR stats: taken={overall_taken}, passed={overall_passed}, pending={overall_pending}")
+                logger.info(f"Overall ROFR rate: {overall_rofr_rate:.2f}% (resolved entries only)")
+
+                overall_stats = {
+                    'averagePrice': round(sum(all_prices) / len(all_prices), 2),
+                    'minPrice': round(min(all_prices), 2),
+                    'maxPrice': round(max(all_prices), 2),
+                    'overallROFRRate': round(overall_rofr_rate, 2),
+                    'totalTaken': overall_taken,
+                    'totalPassed': overall_passed,
+                    'totalPending': overall_pending,
+                    'totalResolved': overall_resolved
+                }
+
+        # Prepare response data in expected frontend format
+        response_data = {
+            'trends': trends_data,
+            'summary': {
+                'totalEntries': len(filtered_entries),
+                'timeRangeMonths': time_range,
+                'filtersApplied': {
+                    'minPrice': min_price,
+                    'maxPrice': max_price,
+                    'resort': resort
+                },
+                'filters': {
+                    'resort': resort
+                },
+                'dateRange': {
+                    'from': cutoff_date.isoformat(),
+                    'to': datetime.now().date().isoformat()
+                },
+                **overall_stats
+            }
+        }
+
+        return create_success_response(response_data)
+
+    except Exception as e:
+        logger.error(f"Error in get_price_trends_analysis: {str(e)}", exc_info=True)
+        return create_error_response("Internal server error")
+
+@app.function_name(name="debug_resort_data")
+@app.route(route="debug-resort-data", auth_level=func.AuthLevel.ANONYMOUS)
+def debug_resort_data(req: func.HttpRequest) -> func.HttpResponse:
+    """Debug endpoint to check resort data and ROFR entries."""
+    try:
+        resort = req.params.get('resort', 'VGC')
+        limit = int(req.params.get('limit', '50'))
+
+        logger.info(f"Debug resort data requested: resort={resort}, limit={limit}")
+
+        # Get storage manager and fetch data
+        storage = get_storage_manager()
+
+        # Get all entries for the resort
+        entries = storage.query_entries_optimized(
+            limit=10000,
+            sort_by='sent_date',
+            sort_order='desc'
+        )
+
+        # Filter by resort
+        resort_entries = [e for e in entries if e.resort == resort]
+
+        logger.info(f"Found {len(resort_entries)} entries for resort {resort}")
+
+        # Get recent entries within last 2 years
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.now().date() - timedelta(days=24 * 30)  # 24 months
+        recent_entries = [e for e in resort_entries if e.sent_date and e.sent_date >= cutoff_date]
+
+        logger.info(f"Found {len(recent_entries)} recent entries (last 24 months) for resort {resort}")
+
+        # Analyze results
+        taken_entries = [e for e in recent_entries if e.result == 'taken']
+        passed_entries = [e for e in recent_entries if e.result == 'passed']
+        pending_entries = [e for e in recent_entries if e.result == 'pending']
+
+        # Get sample entries for debugging
+        sample_entries = recent_entries[:limit]
+        sample_data = []
+
+        for entry in sample_entries:
+            sample_data.append({
+                'username': entry.username,
+                'price_per_point': entry.price_per_point,
+                'points': entry.points,
+                'resort': entry.resort,
+                'sent_date': entry.sent_date.isoformat() if entry.sent_date else None,
+                'result': entry.result,
+                'result_date': entry.result_date.isoformat() if entry.result_date else None,
+                'use_year': entry.use_year
+            })
+
+        # Check for other resort variations
+        all_resorts = list(set([e.resort for e in entries if e.resort]))
+        vgc_variations = [r for r in all_resorts if 'vgc' in r.lower() or 'grand' in r.lower() or 'californian' in r.lower()]
+
+        response_data = {
+            'resort_searched': resort,
+            'total_entries_for_resort': len(resort_entries),
+            'recent_entries_count': len(recent_entries),
+            'result_breakdown': {
+                'taken': len(taken_entries),
+                'passed': len(passed_entries),
+                'pending': len(pending_entries)
+            },
+            'rofr_rate_resolved_only': (len(taken_entries) / (len(taken_entries) + len(passed_entries)) * 100) if (len(taken_entries) + len(passed_entries)) > 0 else 0,
+            'sample_entries': sample_data,
+            'all_resort_codes_in_db': sorted(all_resorts),
+            'possible_vgc_variations': vgc_variations,
+            'cutoff_date': cutoff_date.isoformat(),
+            'debug_info': {
+                'total_entries_in_db': len(entries),
+                'query_limit': limit
+            }
+        }
+
+        return create_success_response(response_data)
+
+    except Exception as e:
+        logger.error(f"Error in debug_resort_data: {str(e)}", exc_info=True)
+        return create_error_response("Internal server error")
 
 @app.function_name(name="health_check")
 @app.route(route="health", auth_level=func.AuthLevel.ANONYMOUS)

@@ -42,7 +42,7 @@ const PriceTrends = () => {
   const [data, setData] = useState(null);
   const [resorts, setResorts] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
-  const [selectedResort, setSelectedResort] = useState("");
+  const [selectedResort, setSelectedResort] = useState("BWV");
   const [timeRange, setTimeRange] = useState(12);
   const [chartType, setChartType] = useState("combined");
   const [priceRange, setPriceRange] = useState([0, 300]);
@@ -72,17 +72,37 @@ const PriceTrends = () => {
         await prefetchData(["resorts"]);
 
         const resortsData = await getResorts();
+        console.log("Resorts data received:", resortsData);
         setResorts(resortsData.data || []);
+        console.log("Resorts state set to:", resortsData.data || []);
 
         // Fetch initial data using the new endpoint
+        // Wait a bit to ensure resorts are loaded if selectedResort is set
+        if (
+          selectedResort &&
+          resortsData.data &&
+          !resortsData.data.includes(selectedResort)
+        ) {
+          console.warn(
+            "Selected resort",
+            selectedResort,
+            "not found in available resorts:",
+            resortsData.data,
+          );
+        }
+
         const filters = {
+          resort: selectedResort || undefined,
           timeRange: timeRange,
           minPrice: priceRange[0],
           maxPrice: priceRange[1],
         };
 
+        console.log("Initial data fetch with filters:", filters);
         const trendsData = await fetchPriceTrendsData(filters);
+        console.log("Initial trends data received:", trendsData);
         setData(trendsData);
+        console.log("Data state set to:", trendsData);
       } catch (err) {
         console.error("Error fetching price trends:", err);
       } finally {
@@ -91,9 +111,11 @@ const PriceTrends = () => {
     };
 
     fetchInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getResorts, timeRange, priceRange, prefetchData, fetchPriceTrendsData]);
 
   const handleResortChange = async (resort) => {
+    console.log("Resort change triggered:", resort);
     setSelectedResort(resort);
     setLoadingData(true);
     try {
@@ -104,8 +126,11 @@ const PriceTrends = () => {
         maxPrice: priceRange[1],
       };
 
+      console.log("Fetching data with filters:", filters);
       const trendsData = await fetchPriceTrendsData(filters);
+      console.log("Received trends data:", trendsData);
       setData(trendsData);
+      console.log("Data state updated to:", trendsData);
     } catch (err) {
       console.error("Error fetching resort trends:", err);
     } finally {
@@ -536,15 +561,30 @@ const PriceTrends = () => {
                 <Select
                   value={selectedResort}
                   label="Resort"
-                  onChange={(e) => handleResortChange(e.target.value)}
+                  onChange={(e) => {
+                    const newResort = e.target.value;
+                    console.log("Select onChange triggered:", newResort);
+                    console.log("Current selectedResort:", selectedResort);
+                    console.log("Available resorts:", resorts);
+                    console.log(
+                      "Resort change from",
+                      selectedResort,
+                      "to",
+                      newResort,
+                    );
+                    handleResortChange(newResort);
+                  }}
                 >
                   <MenuItem value="">All Resorts</MenuItem>
                   {Array.isArray(resorts) &&
-                    resorts.map((resort) => (
-                      <MenuItem key={resort} value={resort}>
-                        {resort}
-                      </MenuItem>
-                    ))}
+                    resorts.map((resort) => {
+                      console.log("Rendering resort option:", resort);
+                      return (
+                        <MenuItem key={resort} value={resort}>
+                          {resort}
+                        </MenuItem>
+                      );
+                    })}
                 </Select>
               </FormControl>
             </Grid>
@@ -613,6 +653,8 @@ const PriceTrends = () => {
           trends={Array.isArray(data?.trends) ? data.trends : []}
           summary={data?.summary}
         />
+        {/* Debug Info */}
+        {console.log("Rendering MarketInsightsCard with data:", data)}
       </Box>
 
       {/* Active Filters Status */}
@@ -647,6 +689,12 @@ const PriceTrends = () => {
           Array.isArray(data.trends) &&
           data.trends.length > 0 ? (
             <>
+              {console.log(
+                "Rendering charts with trends data:",
+                data.trends,
+                "for resort:",
+                selectedResort,
+              )}
               {chartType === "combined" && (
                 <PriceTrendChart
                   data={data.trends}

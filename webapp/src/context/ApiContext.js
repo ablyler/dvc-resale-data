@@ -452,18 +452,19 @@ export const ApiProvider = ({ children }) => {
   // Dedicated price trends analysis with comprehensive filtering
   const getPriceTrendsAnalysis = useCallback(
     async (filters = {}) => {
-      const params = new URLSearchParams();
-
+      // Clean filters to only include non-empty values
+      const cleanFilters = {};
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== "") {
-          params.append(key, value.toString());
+          cleanFilters[key] = value.toString();
         }
       });
 
-      const queryString = params.toString();
-      const endpoint = `price-trends-analysis${queryString ? `?${queryString}` : ""}`;
-
-      return await apiCall(endpoint, {}, CACHE_TTL.stats);
+      return await apiCall(
+        "price-trends-analysis",
+        { params: cleanFilters },
+        CACHE_TTL.stats,
+      );
     },
     [apiCall],
   );
