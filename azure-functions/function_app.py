@@ -693,92 +693,13 @@ async def scrape_rofr_timer(myTimer: func.TimerRequest) -> None:
     except Exception as e:
         logger.error(f"Error in scheduled scrape: {str(e)}", exc_info=True)
 
-# DISABLED: Queue-triggered function for complete thread processing
-# This function has been disabled because thread processing now happens inline in the timer function
-# Disabled on: 2025-06-18 to resolve queue conflicts and simplify architecture
-# All thread processing now occurs directly in scrape_rofr_timer() function
-
-# @app.queue_trigger(arg_name="msg", queue_name="rofr-complete-thread-processing",
-#                    connection="AzureWebJobsStorage")
-# async def process_complete_thread(msg: func.QueueMessage) -> None:
-#     """Process an entire thread (all pages) in a single function execution."""
-#     # This function is disabled - see scrape_rofr_timer() for inline processing
-#     pass
-
 # Queue-triggered function for statistics calculation
 @app.function_name(name="update_statistics_task")
 @app.queue_trigger(arg_name="msg", queue_name="rofr-statistics-update", connection="AzureWebJobsStorage")
 def update_statistics_task(msg: func.QueueMessage) -> None:
     """Update statistics by recalculating from Azure storage entries table."""
-    global _stats_calculation_in_progress
-
-    if _stats_calculation_in_progress:
-        logger.info("Statistics calculation already in progress, skipping")
-        return
-
-    _stats_calculation_in_progress = True
-
     try:
         logger.info("Processing statistics update task from queue trigger")
-
-        trigger_info = "unknown"
-        try:
-            message_body = msg.get_body()
-            logger.info(f"Stats update - Raw message body type: {type(message_body)}")
-
-            if isinstance(message_body, bytes):
-                message_content = message_body.decode('utf-8')
-            else:
-                message_content = str(message_body)
-
-            logger.info(f"Stats update - Message content length: {len(message_content)}")
-            logger.info(f"Stats update - Message content preview: {message_content[:100]}...")
-
-            # Check if message is empty
-            if not message_content or message_content.strip() == "":
-                logger.error("Stats update queue message is empty")
-                return
-
-            try:
-                # Try base64 decoding first
-                decoded_content = base64.b64decode(message_content).decode('utf-8')
-                logger.info(f"Stats update - Decoded content length: {len(decoded_content)}")
-
-                if not decoded_content or decoded_content.strip() == "":
-                    logger.error("Stats update decoded message content is empty")
-                    return
-
-                # Parse JSON from decoded content
-                task_data = json.loads(decoded_content)
-                trigger_info = task_data.get('trigger_info', 'unknown')
-                logger.info(f"Statistics triggered by: {trigger_info}")
-
-            except (binascii.Error, UnicodeDecodeError) as decode_error:
-                logger.info(f"Stats update - Base64 decode failed ({decode_error}), trying direct parse")
-
-                # Legacy support for old message format
-                if message_content.startswith("thread_completed_"):
-                    trigger_info = message_content.replace("thread_completed_", "")
-                    logger.info(f"Statistics triggered by thread completion: {trigger_info}")
-                else:
-                    # Try as direct JSON
-                    try:
-                        task_data = json.loads(message_content)
-                        trigger_info = task_data.get('trigger_info', 'unknown')
-                        logger.info(f"Statistics triggered by: {trigger_info}")
-                    except json.JSONDecodeError:
-                        logger.warning(f"Could not parse message as JSON, using as-is: {message_content}")
-                        trigger_info = message_content
-
-            except json.JSONDecodeError as json_error:
-                logger.error(f"Stats update - JSON decode failed: {json_error}")
-                logger.error(f"Stats update - Problematic content: '{decoded_content if 'decoded_content' in locals() else message_content}'")
-                return
-
-        except Exception as e:
-            logger.error(f"Stats update - Unexpected error parsing message: {e}")
-            logger.error(f"Stats update - Message body: {message_body if 'message_body' in locals() else 'N/A'}")
-            return
 
         config = get_config()
 
@@ -792,19 +713,10 @@ def update_statistics_task(msg: func.QueueMessage) -> None:
         logger.info("Recalculating statistics from Azure storage entries table")
         stats_result = scraper._calculate_and_store_statistics()
 
-        global CACHE
-        keys_to_remove = [k for k in CACHE.keys() if any(x in k for x in ['stats', 'analytics', 'trends', 'dashboard', 'resort'])]
-        for key in keys_to_remove:
-            del CACHE[key]
-
         logger.info(f"Statistics recalculation completed. Result: {stats_result}")
-        logger.info(f"Cleared {len(keys_to_remove)} cache entries")
-
     except Exception as e:
         logger.error(f"Error updating statistics: {str(e)}", exc_info=True)
         raise
-    finally:
-        _stats_calculation_in_progress = False
 
 # HTTP endpoints
 @app.function_name(name="get_rofr_stats")

@@ -20,11 +20,48 @@ class ROFRParsingUtils:
     """Shared utilities for parsing ROFR entries from forum posts."""
 
     # Regex pattern for ROFR entries
-    ROFR_PATTERN = r'(\w+(?:\s+\w+)?)\s*---\s*\$([0-9.]+)\s*-\s*\$([0-9,]+)\s*-\s*(\d+)\s*-\s*([A-Z]{2,4}(?:@\w+)?)\s*-.*?-\s*sent\s+(\d+/\d+)(?:,\s*(passed|taken)\s+(\d+/\d+))?'
+    ROFR_PATTERN = r'(\w+(?:\s+\w+)?)\s*---\s*\$([0-9.]+)\s*-\s*\$([0-9,.]+)\s*-\s*(\d+)\s*-\s*([A-Z]{2,4}(?:@\w+)?)\s*-\s*(?:([A-Z][a-z]{2})\s*-\s*)?(.*?)-\s*sent\s+(\d+/\d+)(?:,\s*(passed|taken)\s+(\d+/\d+))?'
 
     def __init__(self):
         """Initialize the parsing utilities."""
         self.logger = logging.getLogger(__name__)
+
+    def extract_points_breakdown(self, raw_entry: str) -> str:
+        """
+        Extract year-by-year points breakdown from raw forum entry.
+
+        Args:
+            raw_entry: The raw forum post text containing the ROFR entry
+
+        Returns:
+            String in format "0/13, 77/14, 160/15, 160/16" or "0/24, 250/25, 125/26"
+        """
+        if not raw_entry:
+            return ""
+
+        # Multiple patterns to match different formats of points/year breakdowns
+        patterns = [
+            # Format: 0/'13, 77/'14, 160/'15, 160/'16 (abbreviated years with apostrophes)
+            r"(\d+/'?\d{2}(?:\s*,\s*\d+/'?\d{2}){1,})",
+            # Format: 0/24, 250/25, 125/26 (full years)
+            r"(\d+/\d{2}(?:\s*,\s*\d+/\d{2}){1,})",
+            # Alternative separators
+            r"(\d+/'?\d{2}(?:\s*[-;]\s*\d+/'?\d{2}){1,})",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, raw_entry)
+            if match:
+                breakdown = match.group(1)
+                # Remove apostrophes if present
+                breakdown = breakdown.replace("'", "")
+                # Normalize spacing around commas
+                breakdown = re.sub(r'\s*,\s*', ', ', breakdown)
+                breakdown = re.sub(r'\s*[-;]\s*', ', ', breakdown)
+                breakdown = breakdown.strip()
+                return breakdown
+
+        return ""
 
     def parse_date_string(self, date_str: str, post_timestamp: str = None) -> Optional[date]:
         """
@@ -298,9 +335,11 @@ class ROFRParsingUtils:
                 total_cost = float(total_cost_str)
                 points = int(match.group(4))
                 resort = match.group(5).strip()
-                sent_date_str = match.group(6)
-                result = match.group(7) if match.group(7) else "pending"
-                result_date_str = match.group(8) if match.group(8) else None
+                use_year = match.group(6).strip() if match.group(6) else ""
+                points_breakdown_raw = match.group(7) if match.group(7) else ""
+                sent_date_str = match.group(8)
+                result = match.group(9) if match.group(9) else "pending"
+                result_date_str = match.group(10) if match.group(10) else None
 
                 # Validate post_timestamp and basic entry criteria
                 timestamp_valid = self.validate_post_timestamp(post_timestamp)
@@ -332,8 +371,14 @@ class ROFRParsingUtils:
                     if start_date_filter and sent_date and sent_date < start_date_filter:
                         continue
 
-                    # Extract use year from thread info
-                    use_year = self.extract_use_year_from_thread(thread_info)
+                    # Extract year-by-year points breakdown from the captured points breakdown text
+                    points_breakdown = self.extract_points_breakdown(points_breakdown_raw)
+
+                    # Set points_details based on whether we found a breakdown
+                    if points_breakdown:
+                        points_details = points_breakdown
+                    else:
+                        points_details = f"{points} points per year ({use_year} UY)"
 
                     # Create entry hash for deduplication
                     entry_key = f"{username.lower()}|{price_per_point}|{points}|{resort}|{use_year}|{sent_date_str}"
@@ -346,7 +391,7 @@ class ROFRParsingUtils:
                         points=points,
                         resort=resort,
                         use_year=use_year,
-                        points_details=f"{points} points",
+                        points_details=points_details,
                         sent_date=sent_date,
                         result=result,
                         result_date=result_date,
