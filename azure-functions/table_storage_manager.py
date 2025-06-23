@@ -50,6 +50,11 @@ class OptimizedAzureTableStorageManager:
         self.connection_string = connection_string
         self.logger = logging.getLogger(__name__)
 
+        # Configure log level from environment variable
+        log_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
+        log_level = getattr(logging, log_level_str, logging.INFO)
+        self.logger.setLevel(log_level)
+
         # Table names for different data types
         self.entries_table_name = os.environ.get("ENTRIES_TABLE_NAME", "entries")
         self.threads_table_name = os.environ.get("THREADS_TABLE_NAME", "threads")
@@ -799,7 +804,10 @@ class OptimizedAzureTableStorageManager:
     def batch_upsert_entries(self, entries: List[ROFREntry]) -> Dict[str, int]:
         """Optimized batch upsert entries for better performance with reduced error handling overhead."""
         if not entries:
+            self.logger.debug("batch_upsert_entries: No entries to process")
             return {'success': 0, 'failed': 0}
+
+        self.logger.debug(f"batch_upsert_entries: Processing {len(entries)} entries")
 
         success_count = 0
         failed_count = 0
@@ -810,9 +818,12 @@ class OptimizedAzureTableStorageManager:
         for entry in entries:
             entity = entry.to_table_entity()
             row_key = entity['RowKey']
+            self.logger.debug(f"batch_upsert_entries: Processing entry with RowKey: {row_key}")
+            self.logger.debug(f"batch_upsert_entries: Entry details - username: {entry.username}, resort: {entry.resort}, points: {entry.points}, price: {entry.price_per_point}")
             # Keep the latest entry if duplicates exist
             if row_key in unique_entries:
                 duplicate_count += 1
+                self.logger.debug(f"batch_upsert_entries: Found duplicate RowKey: {row_key}")
             unique_entries[row_key] = entry
 
         # Convert back to list
@@ -820,6 +831,8 @@ class OptimizedAzureTableStorageManager:
 
         if duplicate_count > 0:
             self.logger.info(f"Deduplicated {duplicate_count} duplicate entries from batch of {len(entries)} entries")
+
+        self.logger.debug(f"batch_upsert_entries: After deduplication, processing {len(deduplicated_entries)} unique entries")
 
         # Group entries by partition key for better batch performance
         partitioned_entries = {}
@@ -842,23 +855,30 @@ class OptimizedAzureTableStorageManager:
                         for entry in batch:
                             entity = entry.to_table_entity()
                             row_key = entity['RowKey']
+                            self.logger.debug(f"batch_operation: Creating upsert operation for RowKey: {row_key}")
                             # Skip if we've already seen this row key in this batch
                             if row_key not in batch_row_keys:
                                 operations.append(('upsert', entity))
                                 batch_row_keys.add(row_key)
+                            else:
+                                self.logger.debug(f"batch_operation: Skipping duplicate RowKey in batch: {row_key}")
 
+                        self.logger.debug(f"batch_operation: Submitting {len(operations)} operations to Azure Table Storage")
                         # Submit batch transaction
                         self._ensure_connections()
                         if not self._entries_table_client:
                             raise AzureError("Entries table client not initialized")
                         self._entries_table_client.submit_transaction(operations)
+                        self.logger.debug(f"batch_operation: Successfully submitted {len(operations)} operations")
                         return len(operations)
 
                     batch_success = self._execute_with_retry(batch_operation)
                     success_count += batch_success
+                    self.logger.debug(f"batch_upsert_entries: Batch completed successfully. Operations: {batch_success}")
 
                 except Exception as e:
-                    self.logger.warning(f"Batch upsert failed for partition {partition_key}, batch {i//self.batch_size + 1}: {e}")
+                    self.logger.error(f"batch_upsert_entries: Batch upsert failed for partition {partition_key}, batch {i//self.batch_size + 1}: {e}")
+                    self.logger.error(f"batch_upsert_entries: Failed batch contained {len(batch)} entries")
                     # Skip individual fallbacks for better performance - just count as failed
                     failed_count += len(batch)
 

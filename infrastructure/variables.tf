@@ -15,12 +15,6 @@ variable "location" {
   default     = "Central US"
 }
 
-variable "domain_name" {
-  description = "Custom domain name for the website"
-  type        = string
-  default     = "dvcresaledata.com"
-}
-
 variable "environment" {
   description = "Environment name"
   type        = string
@@ -50,16 +44,6 @@ variable "function_app_sku" {
   validation {
     condition     = contains(["Y1", "EP1", "EP2", "EP3"], var.function_app_sku)
     error_message = "Function App SKU must be one of: Y1, EP1, EP2, EP3."
-  }
-}
-
-variable "static_web_app_sku" {
-  description = "SKU for the Azure Static Web App"
-  type        = string
-  default     = "Free"
-  validation {
-    condition     = contains(["Free", "Standard"], var.static_web_app_sku)
-    error_message = "Static Web App SKU must be either Free or Standard."
   }
 }
 

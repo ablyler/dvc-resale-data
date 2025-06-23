@@ -40,20 +40,6 @@ resource "azurerm_storage_table" "sessions" {
   storage_account_name = azurerm_storage_account.rofr_data.name
 }
 
-# Azure Static Web Apps
-resource "azurerm_static_web_app" "main" {
-  name                = "dvcresaledata"
-  resource_group_name = data.azurerm_resource_group.main.name
-  location            = data.azurerm_resource_group.main.location
-  sku_tier            = "Free"
-  sku_size            = "Free"
-
-  # Optional API configuration to link with Function App
-  # This will be configured separately in GitHub Actions
-
-  tags = local.common_tags
-}
-
 # Log Analytics Workspace
 resource "azurerm_log_analytics_workspace" "main" {
   name                = "dvc-resale-data-logs"
@@ -128,101 +114,12 @@ resource "azurerm_linux_function_app" "main" {
   tags = local.common_tags
 }
 
-# DNS Zone
-resource "azurerm_dns_zone" "main" {
-  name                = var.domain_name
-  resource_group_name = data.azurerm_resource_group.main.name
-
-  tags = local.common_tags
-}
-
-# Static Web Apps Custom Domains
-resource "azurerm_static_web_app_custom_domain" "apex" {
-  static_web_app_id = azurerm_static_web_app.main.id
-  domain_name       = var.domain_name
-  validation_type   = "dns-txt-token"
-}
-
-resource "azurerm_static_web_app_custom_domain" "www" {
-  static_web_app_id = azurerm_static_web_app.main.id
-  domain_name       = "www.${var.domain_name}"
-  validation_type   = "dns-txt-token"
-}
-
-# DNS Records for domain validation
-resource "azurerm_dns_txt_record" "apex_validation" {
-  name                = "asverify"
-  zone_name           = azurerm_dns_zone.main.name
-  resource_group_name = data.azurerm_resource_group.main.name
-  ttl                 = local.dns_records.ttl_short
-
-  record {
-    value = azurerm_static_web_app_custom_domain.apex.validation_token
-  }
-
-  tags = local.common_tags
-}
-
-resource "azurerm_dns_txt_record" "www_validation" {
-  name                = "asverify.www"
-  zone_name           = azurerm_dns_zone.main.name
-  resource_group_name = data.azurerm_resource_group.main.name
-  ttl                 = local.dns_records.ttl_short
-
-  record {
-    value = azurerm_static_web_app_custom_domain.www.validation_token
-  }
-
-  tags = local.common_tags
-}
-
-# DNS A record for apex domain (points to Static Web Apps)
-data "azurerm_static_web_app" "main_data" {
-  name                = azurerm_static_web_app.main.name
-  resource_group_name = data.azurerm_resource_group.main.name
-  depends_on          = [azurerm_static_web_app_custom_domain.apex]
-}
-
-resource "azurerm_dns_a_record" "apex" {
-  name                = "@"
-  zone_name           = azurerm_dns_zone.main.name
-  resource_group_name = data.azurerm_resource_group.main.name
-  ttl                 = local.dns_records.ttl_medium
-  records             = ["185.199.108.153", "185.199.109.153", "185.199.110.153", "185.199.111.153"]
-
-  depends_on = [azurerm_static_web_app_custom_domain.apex]
-  tags       = local.common_tags
-}
-
-# DNS CNAME record for www subdomain
-resource "azurerm_dns_cname_record" "www" {
-  name                = "www"
-  zone_name           = azurerm_dns_zone.main.name
-  resource_group_name = data.azurerm_resource_group.main.name
-  ttl                 = local.dns_records.ttl_medium
-  record              = azurerm_static_web_app.main.default_host_name
-
-  depends_on = [azurerm_static_web_app_custom_domain.www]
-  tags       = local.common_tags
-}
-
-# Function App API domain
-resource "azurerm_dns_cname_record" "api" {
-  name                = "api"
-  zone_name           = azurerm_dns_zone.main.name
-  resource_group_name = data.azurerm_resource_group.main.name
-  ttl                 = local.dns_records.ttl_medium
-  record              = "${azurerm_linux_function_app.main.name}.azurewebsites.net"
-}
-
 # Role assignments for Function App managed identity
 resource "azurerm_role_assignment" "function_storage_contributor" {
   scope                = azurerm_storage_account.rofr_data.id
   role_definition_name = "Storage Table Data Contributor"
   principal_id         = azurerm_linux_function_app.main.identity[0].principal_id
 }
-
-
 
 # Diagnostic settings for Function App
 resource "azurerm_monitor_diagnostic_setting" "function_app" {
@@ -268,31 +165,6 @@ resource "azurerm_monitor_metric_alert" "function_app_availability" {
     aggregation      = "Count"
     operator         = "GreaterThan"
     threshold        = local.alert_thresholds.function_error_rate
-  }
-
-  action {
-    action_group_id = azurerm_monitor_action_group.main.id
-  }
-
-  tags = local.common_tags
-}
-
-# Static Web Apps availability alert
-resource "azurerm_monitor_metric_alert" "static_web_apps_availability" {
-  name                = "static-web-apps-availability"
-  resource_group_name = data.azurerm_resource_group.main.name
-  scopes              = [azurerm_static_web_app.main.id]
-  description         = "Static Web Apps availability alert"
-  frequency           = "PT5M"
-  window_size         = "PT15M"
-  severity            = 1
-
-  criteria {
-    metric_namespace = "Microsoft.Web/staticSites"
-    metric_name      = "SiteErrors"
-    aggregation      = "Total"
-    operator         = "GreaterThan"
-    threshold        = 10
   }
 
   action {

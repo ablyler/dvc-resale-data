@@ -7,6 +7,7 @@ Contains common logic used by both AzureROFRScraper and CompleteThreadProcessor.
 """
 
 import re
+import os
 import hashlib
 import logging
 from datetime import datetime, date
@@ -25,6 +26,11 @@ class ROFRParsingUtils:
     def __init__(self):
         """Initialize the parsing utilities."""
         self.logger = logging.getLogger(__name__)
+
+        # Configure log level from environment variable
+        log_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
+        log_level = getattr(logging, log_level_str, logging.INFO)
+        self.logger.setLevel(log_level)
 
     def extract_points_breakdown(self, raw_entry: str) -> str:
         """
@@ -78,55 +84,90 @@ class ROFRParsingUtils:
             Parsed date object or None if parsing fails
         """
         if not date_str:
+            self.logger.debug(f"parse_date_string: date_str is empty or None")
             return None
+
+        self.logger.debug(f"parse_date_string: parsing '{date_str}' with post_timestamp '{post_timestamp}'")
 
         try:
             # Handle formats like "6/18", "12/5", etc.
             parts = date_str.split('/')
+            self.logger.debug(f"parse_date_string: split parts = {parts}")
+
             if len(parts) == 2:
                 month = int(parts[0])
                 day = int(parts[1])
+                self.logger.debug(f"parse_date_string: extracted month={month}, day={day}")
+
+                # Validate month and day ranges
+                if not (1 <= month <= 12) or not (1 <= day <= 31):
+                    self.logger.debug(f"parse_date_string: Invalid month ({month}) or day ({day})")
+                    return None
 
                 # Determine year from post_timestamp if available
                 year = datetime.now().year
-                if post_timestamp:
+                if post_timestamp and post_timestamp.strip():
                     try:
                         # post_timestamp is a Unix timestamp, extract year from it
                         post_datetime = datetime.fromtimestamp(int(post_timestamp))
                         year = post_datetime.year
-                        self.logger.debug(f"Using post timestamp {post_timestamp} -> year {year} for date {date_str}")
-                    except (ValueError, TypeError):
+                        self.logger.debug(f"parse_date_string: Using post timestamp {post_timestamp} -> year {year} for date {date_str}")
+                    except (ValueError, TypeError, OSError) as e:
                         # If post_timestamp parsing fails, fall back to current year
-                        self.logger.debug(f"Failed to parse post_timestamp {post_timestamp}, using current year")
+                        self.logger.debug(f"parse_date_string: Failed to parse post_timestamp {post_timestamp}, using current year. Error: {e}")
                         year = datetime.now().year
 
-                # Create initial date
-                parsed_date = date(year, month, day)
+                # Create initial date with validation
+                try:
+                    parsed_date = date(year, month, day)
+                    self.logger.debug(f"parse_date_string: initial parsed_date = {parsed_date}")
+                except ValueError as e:
+                    self.logger.debug(f"parse_date_string: Invalid date {year}-{month}-{day}: {e}")
+                    return None
 
                 # Check if this date is unreasonably far in the future (more than 30 days)
                 # This handles cases where "12/31" in a 2025 thread should be 2024-12-31
                 today = date.today()
                 days_in_future = (parsed_date - today).days
+                self.logger.debug(f"parse_date_string: days_in_future = {days_in_future}")
 
                 if days_in_future > 30:
                     # Try previous year
-                    test_date = date(year - 1, month, day)
-                    test_days_diff = (test_date - today).days
-                    # Use previous year if it's not too far in the past (within 1 year)
-                    if test_days_diff >= -365:
-                        parsed_date = test_date
-                        self.logger.debug(f"Adjusted date '{date_str}' from {year} to {year-1} to avoid future date")
+                    try:
+                        test_date = date(year - 1, month, day)
+                        test_days_diff = (test_date - today).days
+                        # Use previous year if it's not too far in the past (within 1 year)
+                        if test_days_diff >= -365:
+                            parsed_date = test_date
+                            self.logger.debug(f"parse_date_string: Adjusted date '{date_str}' from {year} to {year-1} to avoid future date")
+                    except ValueError as e:
+                        self.logger.debug(f"parse_date_string: Could not adjust to previous year: {e}")
 
+                self.logger.debug(f"parse_date_string: final parsed_date = {parsed_date}")
                 return parsed_date
             elif len(parts) == 3:
                 # MM/DD/YYYY format
                 month = int(parts[0])
                 day = int(parts[1])
                 year = int(parts[2])
-                return date(year, month, day)
+
+                # Validate ranges
+                if not (1 <= month <= 12) or not (1 <= day <= 31) or year < 2000 or year > 2100:
+                    self.logger.debug(f"parse_date_string: Invalid 3-part date {month}/{day}/{year}")
+                    return None
+
+                try:
+                    parsed_date = date(year, month, day)
+                    self.logger.debug(f"parse_date_string: parsed 3-part date = {parsed_date}")
+                    return parsed_date
+                except ValueError as e:
+                    self.logger.debug(f"parse_date_string: Invalid 3-part date {year}-{month}-{day}: {e}")
+                    return None
             else:
+                self.logger.debug(f"parse_date_string: invalid number of parts: {len(parts)}")
                 return None
-        except (ValueError, IndexError):
+        except (ValueError, IndexError) as e:
+            self.logger.debug(f"parse_date_string: Exception parsing '{date_str}': {e}")
             return None
 
     def parse_date_with_thread_year(self, date_str: str, thread_year: Optional[int]) -> Optional[date]:
@@ -328,7 +369,18 @@ class ROFRParsingUtils:
         matches = re.finditer(self.ROFR_PATTERN, post_text, re.IGNORECASE)
 
         for match in matches:
+            self.logger.info(f"Processing match as possible ROFR entry: {match.group(0)}")
+
             try:
+                # Debug all captured groups
+                self.logger.debug(f"Regex groups captured:")
+                for i in range(len(match.groups()) + 1):
+                    try:
+                        group_value = match.group(i)
+                        self.logger.debug(f"Group {i}: '{group_value}'")
+                    except IndexError:
+                        self.logger.debug(f"Group {i}: <not captured>")
+
                 username = match.group(1).strip()
                 price_per_point = float(match.group(2))
                 total_cost_str = match.group(3).replace(',', '')
@@ -345,34 +397,71 @@ class ROFRParsingUtils:
                 timestamp_valid = self.validate_post_timestamp(post_timestamp)
                 username_matches = self.validate_username_match(username, poster_username)
 
-                if (len(username) > 0 and len(resort) > 0 and
-                    points > 0 and price_per_point > 0 and price_per_point < 500 and
-                    total_cost > 0 and username_matches):
+                # debug logging to figure out why the below code is not working as expected
+                self.logger.debug(f"username: {username}, poster_username: {poster_username}, username_matches: {username_matches}")
+                self.logger.debug(f"timestamp_valid: {timestamp_valid}")
+                self.logger.debug(f"username_matches: {username_matches}")
+                self.logger.debug(f"resort: {resort}")
+                self.logger.debug(f"points: {points}")
+                self.logger.debug(f"price_per_point: {price_per_point}")
+                self.logger.debug(f"total_cost: {total_cost}")
+                self.logger.debug(f"sent_date_str: '{sent_date_str}'")
+                self.logger.debug(f"use_year: '{use_year}'")
+                self.logger.debug(f"points_breakdown_raw: '{points_breakdown_raw}'")
+
+                # Check all validation conditions
+                username_valid = len(username) > 0
+                resort_valid = len(resort) > 0
+                points_valid = points > 0
+                price_valid = price_per_point > 0 and price_per_point < 500
+                cost_valid = total_cost > 0
+
+                self.logger.debug(f"Validation checks: username_valid={username_valid}, resort_valid={resort_valid}, points_valid={points_valid}, price_valid={price_valid}, cost_valid={cost_valid}, username_matches={username_matches}")
+
+                if (username_valid and resort_valid and points_valid and price_valid and cost_valid and username_matches):
 
                     # Parse dates - use post_timestamp if available, otherwise fall back to thread year
+                    self.logger.debug(f"About to parse dates. timestamp_valid={timestamp_valid}, post_timestamp={post_timestamp}")
+
+                    sent_date = None
+                    result_date = None
+
                     if timestamp_valid:
                         sent_date = self.parse_date_string(sent_date_str, post_timestamp)
                         result_date = self.parse_date_string(result_date_str, post_timestamp) if result_date_str else None
-                    else:
-                        # Fall back to thread year method for backward compatibility
+                        self.logger.debug(f"Parsed dates using timestamp: sent_date={sent_date}, result_date={result_date}")
+
+                    # If timestamp parsing failed or timestamp not valid, fall back to thread year
+                    if not sent_date:
+                        self.logger.debug(f"Timestamp parsing failed or invalid, falling back to thread year method")
                         sent_date = self.parse_date_with_thread_year(sent_date_str, thread_info.start_year)
                         result_date = self.parse_date_with_thread_year(result_date_str, thread_info.start_year) if result_date_str else None
+                        self.logger.debug(f"Parsed dates using thread year {thread_info.start_year}: sent_date={sent_date}, result_date={result_date}")
 
-                    # Skip entry if we cannot parse sent_date
+                    # Skip entry if we still cannot parse sent_date
                     if not sent_date:
-                        self.logger.warning(f"Skipping entry - could not parse sent_date '{sent_date_str}' for user {username}")
+                        self.logger.warning(f"SKIPPING ENTRY - could not parse sent_date '{sent_date_str}' for user {username} using either timestamp or thread year method")
                         continue
+
+                    self.logger.debug(f"Date parsing successful: sent_date={sent_date}")
 
                     # Handle year rollover for result dates
                     if result_date and sent_date:
                         result_date = self.adjust_result_date_for_year_rollover(sent_date, result_date)
 
                     # Apply start date filter
+                    self.logger.debug(f"Checking start_date_filter: filter={start_date_filter}, sent_date={sent_date}")
                     if start_date_filter and sent_date and sent_date < start_date_filter:
+                        self.logger.warning(f"Skipping entry - sent_date '{sent_date_str}' is before start_date_filter '{start_date_filter}' for user {username}")
                         continue
 
                     # Extract year-by-year points breakdown from the captured points breakdown text
-                    points_breakdown = self.extract_points_breakdown(points_breakdown_raw)
+                    try:
+                        points_breakdown = self.extract_points_breakdown(points_breakdown_raw)
+                        self.logger.debug(f"Points breakdown extraction result: '{points_breakdown}'")
+                    except Exception as e:
+                        self.logger.debug(f"Points breakdown extraction failed: {e}")
+                        points_breakdown = None
 
                     # Set points_details based on whether we found a breakdown
                     if points_breakdown:
@@ -380,36 +469,54 @@ class ROFRParsingUtils:
                     else:
                         points_details = f"{points} points per year ({use_year} UY)"
 
-                    # Create entry hash for deduplication
-                    entry_key = f"{username.lower()}|{price_per_point}|{points}|{resort}|{use_year}|{sent_date_str}"
-                    entry_hash = hashlib.md5(entry_key.encode()).hexdigest()
+                    self.logger.debug(f"Final points_details: '{points_details}'")
 
-                    entry = ROFREntry(
-                        username=username,
-                        price_per_point=price_per_point,
-                        total_cost=total_cost,
-                        points=points,
-                        resort=resort,
-                        use_year=use_year,
-                        points_details=points_details,
-                        sent_date=sent_date,
-                        result=result,
-                        result_date=result_date,
-                        thread_url=thread_info.url,
-                        raw_entry=match.group(0),
-                        entry_hash=entry_hash
-                    )
-                    entries.append(entry)
+                    # Create entry hash for deduplication
+                    try:
+                        entry_key = f"{username.lower()}|{price_per_point}|{points}|{resort}|{use_year}|{sent_date_str}"
+                        entry_hash = hashlib.md5(entry_key.encode()).hexdigest()
+                        self.logger.debug(f"Generated entry hash: {entry_hash}")
+                    except Exception as e:
+                        self.logger.debug(f"Failed to generate entry hash: {e}")
+                        entry_hash = "fallback_hash"
+
+                    # Create ROFREntry object
+                    try:
+                        entry = ROFREntry(
+                            username=username,
+                            price_per_point=price_per_point,
+                            total_cost=total_cost,
+                            points=points,
+                            resort=resort,
+                            use_year=use_year,
+                            points_details=points_details,
+                            sent_date=sent_date,
+                            result=result,
+                            result_date=result_date,
+                            thread_url=thread_info.url,
+                            raw_entry=match.group(0),
+                            entry_hash=entry_hash
+                        )
+                        entries.append(entry)
+                        self.logger.debug(f"Successfully created and added entry to list: {username} - {price_per_point} - {points} - {resort} - {sent_date}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to create ROFREntry object: {e}")
+                        self.logger.error(f"Entry data: username={username}, price={price_per_point}, points={points}, resort={resort}, sent_date={sent_date}")
+                        continue
 
                 else:
                     if not username_matches:
                         self.logger.debug(f"Username mismatch: extracted='{username}', poster='{poster_username}'")
                     else:
                         self.logger.debug(f"Entry validation failed for: {username}")
+                        self.logger.debug(f"Failed validation details: username_valid={username_valid}, resort_valid={resort_valid}, points_valid={points_valid}, price_valid={price_valid}, cost_valid={cost_valid}")
 
             except Exception as e:
-                self.logger.error(f"Error parsing entry: {match.group(0)}")
+                self.logger.error(f"CRITICAL ERROR parsing entry: {match.group(0)}")
                 self.logger.error(f"Error details: {e}")
+                self.logger.error(f"Error type: {type(e).__name__}")
+                import traceback
+                self.logger.error(f"Full traceback: {traceback.format_exc()}")
 
         self.logger.debug(f"Parsed {len(entries)} valid entries from post on page {page_number}")
         return entries

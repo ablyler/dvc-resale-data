@@ -6,7 +6,6 @@
 subscription_id      = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 resource_group_name  = "dvc-resale-data"
 location            = "East US 2"
-domain_name         = "dvcresaledata.com"
 
 # Environment and Project Settings
 environment    = "production"
@@ -15,8 +14,7 @@ project_name   = "dvc-resale-data"
 # Function App Configuration
 function_app_sku = "Y1"  # Y1 (Consumption), EP1, EP2, EP3 (Premium)
 
-# Front Door Configuration
-frontdoor_sku = "Standard_AzureFrontDoor"  # Standard_AzureFrontDoor, Premium_AzureFrontDoor
+
 
 # Logging and Monitoring
 log_retention_days     = 30

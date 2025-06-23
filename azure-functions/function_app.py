@@ -26,8 +26,10 @@ from rofr_parsing_utils import ROFRParsingUtils
 # Initialize Function App
 app = func.FunctionApp()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with environment variable control
+log_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
 
 

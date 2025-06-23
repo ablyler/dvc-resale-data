@@ -3,8 +3,6 @@ locals {
   # Common naming conventions
   resource_prefix = "${var.project_name}-${var.environment}"
 
-  # Static Web App naming
-  static_web_app_name = "dvcresaledata"
 
   # Common tags to be applied to all resources
   common_tags = merge(var.tags, {
@@ -12,7 +10,6 @@ locals {
     Project     = var.project_name
     ManagedBy   = "terraform"
     DeployedBy  = "github-actions"
-    Domain      = var.domain_name
   })
 
   # Function App settings
@@ -56,8 +53,8 @@ locals {
 
   # CORS origins for Function App
   cors_origins = [
-    "https://${var.domain_name}",
-    "https://www.${var.domain_name}",
+    "https://dvcresaledata.com",
+    "https://www.dvcresaledata.com",
     "https://portal.azure.com",
     "https://functions.azure.com",
     "https://functions-staging.azure.com",
@@ -117,13 +114,6 @@ locals {
     "Referrer-Policy"           = "strict-origin-when-cross-origin"
     "Permissions-Policy"        = "geolocation=(), microphone=(), camera=()"
     "Strict-Transport-Security" = "max-age=31536000; includeSubDomains"
-  }
-
-  # DNS record configurations
-  dns_records = {
-    ttl_short  = 300   # 5 minutes
-    ttl_medium = 3600  # 1 hour
-    ttl_long   = 86400 # 24 hours
   }
 
   # Monitoring and diagnostics
