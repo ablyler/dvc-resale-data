@@ -46,9 +46,6 @@ data/
 
 # Analysis output
 analysis_results/
-*.png
-*.jpg
-*.pdf
 
 # Jupyter Notebook
 .ipynb_checkpoints
