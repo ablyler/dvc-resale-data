@@ -22,3 +22,4 @@ scripts/model_status.log
 scripts/nohup.out
 data
 *bak*
+build/
